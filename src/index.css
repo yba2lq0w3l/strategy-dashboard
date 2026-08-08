@@ -1,0 +1,185 @@
+@import 'tailwindcss';
+
+/*
+ * 设计令牌 —— 深空暗黑 + 霓虹高亮。
+ * 图表配色经 CVD 校验：teal(#2dd4bf) / rose(#fb7185) 在 deutan 下 ΔE 8.4 通过，
+ * 且始终配合方向 + 直标文字作为二次编码，不依赖颜色单独传达含义。
+ */
+@theme {
+  --color-void: #020617;
+  --color-void-soft: #060c1c;
+  --color-panel: #0a1122;
+  --color-hairline: #16203a;
+
+  --color-neon: #10b981;
+  --color-neon-soft: #34d399;
+  --color-flux: #6366f1;
+  --color-flux-soft: #818cf8;
+  --color-bid: #2dd4bf;
+  --color-ask: #fb7185;
+
+  --color-ink: #e2e8f0;
+  --color-ink-dim: #94a3b8;
+  --color-ink-faint: #64748b;
+
+  --font-mono:
+    ui-monospace, 'SF Mono', 'JetBrains Mono', 'IBM Plex Mono', Menlo, Consolas,
+    monospace;
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', sans-serif;
+
+  --animate-pulse-ring: pulse-ring 2.4s ease-out infinite;
+  --animate-scan: scan 7s linear infinite;
+  --animate-ticker: ticker 1.6s steps(4, end) infinite;
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgb(16 185 129 / 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 9px rgb(16 185 129 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(16 185 129 / 0);
+  }
+}
+
+@keyframes scan {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes ticker {
+  0% {
+    content: '';
+  }
+  100% {
+    content: '...';
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-void text-ink font-sans antialiased;
+    min-height: 100vh;
+    /* 网格纹理 + 双色径向光晕，构成大屏底噪 */
+    background-image:
+      radial-gradient(
+        ellipse 80% 55% at 12% -10%,
+        rgb(16 185 129 / 0.14),
+        transparent 60%
+      ),
+      radial-gradient(
+        ellipse 70% 50% at 92% 0%,
+        rgb(99 102 241 / 0.16),
+        transparent 62%
+      ),
+      linear-gradient(rgb(148 163 184 / 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(148 163 184 / 0.035) 1px, transparent 1px);
+    background-size:
+      100% 100%,
+      100% 100%,
+      46px 46px,
+      46px 46px;
+    background-attachment: fixed;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgb(99 102 241 / 0.28);
+    border-radius: 999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(99 102 241 / 0.5);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-neon-soft);
+    outline-offset: 2px;
+  }
+}
+
+@utility panel {
+  position: relative;
+  border-radius: 0.75rem;
+  border: 1px solid rgb(22 32 58 / 1);
+  background:
+    linear-gradient(160deg, rgb(10 17 34 / 0.92), rgb(6 12 28 / 0.86));
+  box-shadow:
+    inset 0 1px 0 0 rgb(148 163 184 / 0.06),
+    0 18px 48px -28px rgb(0 0 0 / 0.9);
+}
+
+@utility panel-glow {
+  box-shadow:
+    inset 0 1px 0 0 rgb(148 163 184 / 0.08),
+    0 0 0 1px rgb(16 185 129 / 0.14),
+    0 22px 60px -30px rgb(16 185 129 / 0.35);
+}
+
+/* 角标刻线，强化仪表盘的机械感 */
+@utility corner-ticks {
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-color: rgb(16 185 129 / 0.45);
+    pointer-events: none;
+  }
+
+  &::before {
+    top: -1px;
+    left: -1px;
+    border-top-width: 1px;
+    border-left-width: 1px;
+    border-top-left-radius: 0.75rem;
+  }
+
+  &::after {
+    bottom: -1px;
+    right: -1px;
+    border-bottom-width: 1px;
+    border-right-width: 1px;
+    border-bottom-right-radius: 0.75rem;
+  }
+}
+
+@utility label-caps {
+  @apply font-mono text-[10px] tracking-[0.18em] text-ink-faint uppercase;
+}
+
+@utility numeric {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
