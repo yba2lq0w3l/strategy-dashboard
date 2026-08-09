@@ -1,4 +1,4 @@
-import { Hexagon, Plus, RefreshCw } from 'lucide-react'
+import { Hexagon, LayoutTemplate, Plus, RefreshCw } from 'lucide-react'
 import { REFRESH_INTERVALS, type RefreshInterval } from '../config/env'
 import type { ConnectionStatus as Status } from '../hooks/useStrategies'
 import { ConnectionStatus } from './ConnectionStatus'
@@ -14,6 +14,7 @@ interface HeaderProps {
   readonly onIntervalChange: (value: RefreshInterval) => void
   readonly onRefresh: () => void
   readonly onCreate: () => void
+  readonly onLaunchTemplate: () => void
 }
 
 export function Header({
@@ -26,6 +27,7 @@ export function Header({
   onIntervalChange,
   onRefresh,
   onCreate,
+  onLaunchTemplate,
 }: HeaderProps) {
   return (
     <header className="panel corner-ticks flex flex-wrap items-center justify-between gap-4 px-4 py-3">
@@ -88,11 +90,18 @@ export function Header({
         </Button>
 
         <Button
-          variant="primary"
           onClick={onCreate}
           icon={<Plus aria-hidden className="size-3.5" />}
         >
           NEW STRATEGY
+        </Button>
+
+        <Button
+          variant="primary"
+          onClick={onLaunchTemplate}
+          icon={<LayoutTemplate aria-hidden className="size-3.5" />}
+        >
+          FROM TEMPLATE
         </Button>
       </div>
     </header>

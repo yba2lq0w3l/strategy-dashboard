@@ -1,6 +1,10 @@
 import { z } from 'zod'
 import type { Strategy, StrategyMetrics } from '../types/strategy'
 import type { EquityPoint, EquitySeries } from '../types/equity'
+import type {
+  StrategyTemplate,
+  TemplateParamField,
+} from '../types/template'
 import { summarizeEquity } from '../utils/equity'
 
 /**
@@ -107,6 +111,9 @@ export const strategySchema = z
     max_leverage: numericText.nullish(),
     allowed_assets: z.array(z.string()).nullish(),
     expires_at: z.string().nullish(),
+    // OpenAPI 的 StrategyView 未声明这两个字段，但实测创建后确实会回显。
+    take_profit_pct: numericText.nullish(),
+    stop_loss_pct: numericText.nullish(),
     state: strategyStateSchema,
     version: z.number().int().nullish(),
   })
@@ -123,6 +130,9 @@ export const strategySchema = z
     maxLeverage: raw.max_leverage ?? '1',
     allowedAssets: raw.allowed_assets ?? null,
     expiresAt: raw.expires_at ?? null,
+    // 保持上游的 0~1 比例口径，展示时才转百分比。
+    takeProfitPct: raw.take_profit_pct ?? null,
+    stopLossPct: raw.stop_loss_pct ?? null,
     state: raw.state,
     version: raw.version ?? 1,
     metrics: toMetrics(raw),
@@ -174,6 +184,102 @@ export function parseStrategy(payload: unknown): Strategy {
     throw new Error('策略响应格式非法，无法解析该策略对象')
   }
   return parsed.data
+}
+
+const riskLevelSchema = z
+  .string()
+  .transform((value) => value.toUpperCase())
+  .pipe(z.enum(['LOW', 'MEDIUM', 'HIGH']))
+
+/** params_schema 里单个属性的形状，字段按 JSON Schema 约定，全部可选。 */
+const paramPropertySchema = z.object({
+  type: z.string().nullish(),
+  description: z.string().nullish(),
+  minimum: z.number().nullish(),
+  maximum: z.number().nullish(),
+})
+
+const paramsSchemaShape = z.object({
+  required: z.array(z.string()).nullish(),
+  properties: z.record(z.string(), z.unknown()).nullish(),
+})
+
+/**
+ * 把模板的 JSON Schema 片段扁平化成可渲染的字段列表。
+ * 各模板结构不同，任何一处不合预期都只跳过该字段，不影响模板本身可用。
+ */
+function toParamFields(rawSchema: unknown): TemplateParamField[] {
+  const parsed = paramsSchemaShape.safeParse(rawSchema)
+  if (!parsed.success) return []
+
+  const required = new Set(parsed.data.required ?? [])
+  const properties = parsed.data.properties ?? {}
+  const fields: TemplateParamField[] = []
+
+  for (const [name, rawProp] of Object.entries(properties)) {
+    const prop = paramPropertySchema.safeParse(rawProp)
+    if (!prop.success) continue
+
+    fields.push({
+      name,
+      type: prop.data.type ?? 'string',
+      description: prop.data.description ?? '',
+      required: required.has(name),
+      minimum: prop.data.minimum ?? null,
+      maximum: prop.data.maximum ?? null,
+    })
+  }
+
+  // 必填参数排在前面，便于用户一眼看到模板的关键输入。
+  return fields.toSorted((a, b) => Number(b.required) - Number(a.required))
+}
+
+const templateSchema = z
+  .object({
+    template_id: z.string().min(1),
+    name: z.string().nullish(),
+    description: z.string().nullish(),
+    recommended_leverage: numericText.nullish(),
+    default_allocation: numericText.nullish(),
+    risk_level: riskLevelSchema,
+    params_schema: z.unknown().nullish(),
+  })
+  .transform<StrategyTemplate>((raw) => ({
+    templateId: raw.template_id,
+    name: raw.name ?? raw.template_id,
+    description: raw.description ?? '',
+    recommendedLeverage: raw.recommended_leverage ?? '1',
+    defaultAllocation: raw.default_allocation ?? '0',
+    riskLevel: raw.risk_level,
+    params: toParamFields(raw.params_schema),
+  }))
+
+const templateListSchema = z.object({
+  items: z.array(z.unknown()).nullable(),
+})
+
+export interface TemplateListResult {
+  readonly templates: readonly StrategyTemplate[]
+  readonly skipped: number
+}
+
+/** 逐条校验，坏模板只跳过自己，不影响其余模板可选。 */
+export function parseTemplateList(payload: unknown): TemplateListResult {
+  const envelope = templateListSchema.safeParse(payload)
+  if (!envelope.success) {
+    throw new Error('策略模板响应格式非法：缺少 items 字段')
+  }
+
+  const templates: StrategyTemplate[] = []
+  let skipped = 0
+
+  for (const item of envelope.data.items ?? []) {
+    const parsed = templateSchema.safeParse(item)
+    if (parsed.success) templates.push(parsed.data)
+    else skipped += 1
+  }
+
+  return { templates, skipped }
 }
 
 const equityPointSchema = z

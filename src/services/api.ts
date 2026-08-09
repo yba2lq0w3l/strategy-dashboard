@@ -5,11 +5,14 @@ import {
   parseEquityHistory,
   parseStrategy,
   parseStrategyList,
+  parseTemplateList,
   type StrategyListResult,
+  type TemplateListResult,
 } from './schemas'
 
 const STRATEGIES_PATH = '/v1/agent/strategies'
 const EQUITY_HISTORY_PATH = `${STRATEGIES_PATH}/equity-history`
+const TEMPLATES_PATH = '/v1/agent/strategy-templates'
 
 function toCreatePayload(input: CreateStrategyInput): Record<string, unknown> {
   return {
@@ -24,11 +27,15 @@ function toCreatePayload(input: CreateStrategyInput): Record<string, unknown> {
       ? { allowed_assets: [...input.allowedAssets] }
       : {}),
     ...(input.expiresAt ? { expires_at: input.expiresAt } : {}),
+    // 0~1 比例口径，调用方负责转换；留空表示不设止盈/止损。
+    ...(input.takeProfitPct ? { take_profit_pct: input.takeProfitPct } : {}),
+    ...(input.stopLossPct ? { stop_loss_pct: input.stopLossPct } : {}),
   }
 }
 
 export interface StrategyRepository {
   list(signal?: AbortSignal): Promise<StrategyListResult>
+  listTemplates(signal?: AbortSignal): Promise<TemplateListResult>
   findById(strategyId: string, signal?: AbortSignal): Promise<Strategy>
   create(input: CreateStrategyInput): Promise<Strategy>
   pause(strategyId: string): Promise<Strategy>
@@ -46,6 +53,11 @@ export const strategyApi: StrategyRepository = {
   async list(signal) {
     const payload = await request(STRATEGIES_PATH, { signal })
     return parseStrategyList(payload)
+  },
+
+  async listTemplates(signal) {
+    const payload = await request(TEMPLATES_PATH, { signal })
+    return parseTemplateList(payload)
   },
 
   async findById(strategyId, signal) {

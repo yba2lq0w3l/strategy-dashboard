@@ -11,6 +11,8 @@ import { StrategyGrid } from './components/StrategyGrid'
 import { TelemetryPanel } from './components/telemetry/TelemetryPanel'
 import { LogConsole } from './components/telemetry/LogConsole'
 import { CreateStrategyModal } from './components/CreateStrategyModal'
+import { LaunchTemplateModal } from './components/templates/LaunchTemplateModal'
+import { useTemplates } from './hooks/useTemplates'
 import { AllocateModal } from './components/AllocateModal'
 import { ToastStack } from './components/ToastStack'
 import { Panel } from './components/ui/Panel'
@@ -22,7 +24,11 @@ import { useTelemetry } from './hooks/useTelemetry'
 import { useToasts, type ToastTone } from './hooks/useToasts'
 import { useNow } from './hooks/useNow'
 import { activeRatio, computePortfolioMetrics } from './utils/metrics'
-import type { Strategy, StrategyAction } from './types/strategy'
+import type {
+  CreateStrategyInput,
+  Strategy,
+  StrategyAction,
+} from './types/strategy'
 
 const DEFAULT_INTERVAL: RefreshInterval = REFRESH_INTERVALS[1].value
 const CLOCK_TICK_MS = 1_000
@@ -38,6 +44,7 @@ export default function App() {
   const [refreshInterval, setRefreshInterval] =
     useState<RefreshInterval>(DEFAULT_INTERVAL)
   const [createOpen, setCreateOpen] = useState(false)
+  const [templateOpen, setTemplateOpen] = useState(false)
   const [allocateTarget, setAllocateTarget] = useState<Strategy | null>(null)
   const [range, setRange] = useState<EquityRange>(DEFAULT_CHART_RANGE)
 
@@ -77,11 +84,27 @@ export default function App() {
     [push],
   )
 
-  const { series: equity, loading: equityLoading } = useEquityHistory({
+  const {
+    series: equity,
+    loading: equityLoading,
+    refresh: refreshEquity,
+  } = useEquityHistory({
     range,
     intervalMs: refreshInterval,
     onError: handleEquityError,
   })
+
+  const templates = useTemplates(templateOpen)
+
+  /** 模板启动成功后立刻刷新策略列表与净值曲线，不等下一个轮询周期。 */
+  const handleLaunchTemplate = useCallback(
+    async (input: CreateStrategyInput) => {
+      const created = await createStrategy(input)
+      await Promise.all([refresh(), refreshEquity()])
+      return created
+    },
+    [createStrategy, refresh, refreshEquity],
+  )
 
   const metrics = useMemo(
     () => computePortfolioMetrics(strategies),
@@ -121,6 +144,7 @@ export default function App() {
         onIntervalChange={setRefreshInterval}
         onRefresh={() => void refresh()}
         onCreate={() => setCreateOpen(true)}
+        onLaunchTemplate={() => setTemplateOpen(true)}
       />
 
       <PerformanceOverview metrics={metrics} summary={summary} />
@@ -193,6 +217,16 @@ export default function App() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onSubmit={createStrategy}
+      />
+
+      <LaunchTemplateModal
+        open={templateOpen}
+        templates={templates.templates}
+        loading={templates.loading}
+        error={templates.error}
+        onReload={() => void templates.reload()}
+        onClose={() => setTemplateOpen(false)}
+        onLaunch={handleLaunchTemplate}
       />
 
       <AllocateModal

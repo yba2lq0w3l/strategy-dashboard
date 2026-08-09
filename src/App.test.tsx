@@ -9,6 +9,7 @@ const pauseMock = vi.fn()
 const createMock = vi.fn()
 const allocateMock = vi.fn()
 const equityMock = vi.fn()
+const templatesMock = vi.fn()
 
 vi.mock('./services/api', () => ({
   strategyApi: {
@@ -20,6 +21,7 @@ vi.mock('./services/api', () => ({
     create: (...args: unknown[]) => createMock(...args),
     allocate: (...args: unknown[]) => allocateMock(...args),
     equityHistory: (...args: unknown[]) => equityMock(...args),
+    listTemplates: (...args: unknown[]) => templatesMock(...args),
   },
 }))
 
@@ -81,8 +83,23 @@ beforeEach(() => {
   createMock.mockReset()
   allocateMock.mockReset()
   equityMock.mockReset()
+  templatesMock.mockReset()
   listMock.mockResolvedValue({ strategies, summary, skipped: 0 })
   equityMock.mockResolvedValue(equitySeries)
+  templatesMock.mockResolvedValue({
+    templates: [
+      {
+        templateId: 'grid_trading_v1',
+        name: '网格交易',
+        description: '在设定价格区间内等分挂单。',
+        recommendedLeverage: '2',
+        defaultAllocation: '1000',
+        riskLevel: 'MEDIUM',
+        params: [],
+      },
+    ],
+    skipped: 0,
+  })
 })
 
 async function renderApp() {
@@ -195,6 +212,58 @@ describe('App 权益曲线', () => {
       expect(screen.getAllByText(/权益曲线加载失败/).length).toBeGreaterThan(0),
     )
     expect(screen.getByText('Alpha Momentum')).toBeInTheDocument()
+  })
+})
+
+describe('App 模板一键启动', () => {
+  it('打开模板弹窗时才拉取模板目录', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+
+    expect(templatesMock).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: /FROM TEMPLATE/ }))
+    await waitFor(() => expect(templatesMock).toHaveBeenCalled())
+    expect(
+      await screen.findByRole('button', { name: /网格交易/ }),
+    ).toBeInTheDocument()
+  })
+
+  it('一键启动后自动刷新策略列表与净值曲线', async () => {
+    const user = userEvent.setup()
+    createMock.mockResolvedValue(
+      makeStrategy({ strategyId: 'strat_tpl', name: '网格交易' }),
+    )
+    await renderApp()
+
+    await user.click(screen.getByRole('button', { name: /FROM TEMPLATE/ }))
+    await user.click(await screen.findByRole('button', { name: /网格交易/ }))
+
+    listMock.mockClear()
+    equityMock.mockClear()
+    await user.click(screen.getByRole('button', { name: /一键启动策略/ }))
+
+    await waitFor(() => expect(createMock).toHaveBeenCalled())
+    // 需求要求创建成功后同时刷新列表与曲线，不等下一个轮询周期
+    await waitFor(() => expect(listMock).toHaveBeenCalled())
+    await waitFor(() => expect(equityMock).toHaveBeenCalled())
+  })
+
+  it('提交给后端的止盈止损是 0~1 比例而不是百分比', async () => {
+    const user = userEvent.setup()
+    createMock.mockResolvedValue(makeStrategy({ strategyId: 'strat_tpl' }))
+    await renderApp()
+
+    await user.click(screen.getByRole('button', { name: /FROM TEMPLATE/ }))
+    await user.click(await screen.findByRole('button', { name: /网格交易/ }))
+    await user.click(screen.getByRole('button', { name: /一键启动策略/ }))
+
+    await waitFor(() => expect(createMock).toHaveBeenCalled())
+    expect(createMock.mock.calls[0][0]).toMatchObject({
+      templateId: 'grid_trading_v1',
+      takeProfitPct: '0.1',
+      stopLossPct: '0.05',
+    })
   })
 })
 

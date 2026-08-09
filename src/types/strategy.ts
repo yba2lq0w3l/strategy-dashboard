@@ -42,6 +42,10 @@ export interface Strategy {
   readonly maxLeverage: string
   readonly allowedAssets: readonly string[] | null
   readonly expiresAt: string | null
+  /** 止盈比例，0~1 口径（"0.1" 表示 +10%）。未设置时为 null。 */
+  readonly takeProfitPct: string | null
+  /** 止损比例，0~1 口径（"0.05" 表示 -5%）。未设置时为 null。 */
+  readonly stopLossPct: string | null
   readonly state: StrategyState
   readonly version: number
   /** 收益统计。上游把这些字段标为可选，缺失时为 null。 */
@@ -58,6 +62,10 @@ export interface CreateStrategyInput {
   readonly maxLeverage: string
   readonly allowedAssets?: readonly string[]
   readonly expiresAt?: string
+  /** 止盈比例，0~1 口径字符串。留空表示不设。 */
+  readonly takeProfitPct?: string
+  /** 止损比例，0~1 口径字符串。留空表示不设。 */
+  readonly stopLossPct?: string
 }
 
 export type StrategyAction = 'pause' | 'resume' | 'terminate'

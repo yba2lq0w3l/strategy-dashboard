@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Ban, Coins, Pause, Play, ShieldCheck } from 'lucide-react'
 import type { Strategy, StrategyAction } from '../types/strategy'
 import { canAllocate, canRunAction } from '../types/strategy'
+import { formatRatioAsPercent } from '../utils/percent'
 import {
   daysUntil,
   formatCurrency,
@@ -90,6 +91,14 @@ export function StrategyCard({
         />
         <MetricRow label="Template" value={strategy.templateId ?? '—'} />
         <MetricRow label="Expires" value={formatDateTime(strategy.expiresAt)} />
+        <MetricRow
+          label="Take Profit"
+          value={formatRatioAsPercent(strategy.takeProfitPct)}
+        />
+        <MetricRow
+          label="Stop Loss"
+          value={formatRatioAsPercent(strategy.stopLossPct)}
+        />
       </dl>
 
       <div>

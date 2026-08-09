@@ -60,6 +60,69 @@ export const allocationFormSchema = z.object({
   allocation: positiveAmount('资金分配'),
 })
 
+const MAX_TP_PERCENT = 1000
+const MAX_SL_PERCENT = 100
+
+/**
+ * 止盈/止损输入校验（**百分比**口径，用户输入 10 表示 10%）。
+ *
+ * 上游收的是 0~1 比例且**完全不校验范围**——实测提交 "10" 会被当作
+ * 1000% 止盈直接入库。所以这里的上界是唯一的防线，不是锦上添花。
+ * 止损上限设为 100%（亏光即离场，超过没有意义）。
+ */
+function percentField(label: string, max: number) {
+  return z
+    .string()
+    .trim()
+    .refine(
+      (value) => value === '' || /^\d+(\.\d+)?$/.test(value),
+      `${label}必须是数字（按百分比填写，如 10 表示 10%）`,
+    )
+    .refine(
+      (value) => value === '' || Number(value) > 0,
+      `${label}必须大于 0`,
+    )
+    .refine(
+      (value) => value === '' || Number(value) <= max,
+      `${label}不能超过 ${max}%`,
+    )
+}
+
+const ASSET_PATTERN = /^[A-Za-z0-9]+(-[A-Za-z0-9]+)*$/
+
+export const launchTemplateFormSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, '策略名称不能为空')
+    .max(MAX_NAME_LENGTH, `策略名称不能超过 ${MAX_NAME_LENGTH} 个字符`),
+  allocation: positiveAmount('授权额度'),
+  // 留空表示不设止盈/止损，属于合法输入。
+  takeProfitPct: percentField('止盈比例', MAX_TP_PERCENT),
+  stopLossPct: percentField('止损比例', MAX_SL_PERCENT),
+  allowedAssets: z
+    .string()
+    .trim()
+    .refine(
+      (value) =>
+        value === '' ||
+        splitAssets(value).every((asset) => ASSET_PATTERN.test(asset)),
+      '资产对格式非法，请用逗号分隔，如 BTC-USDT, ETH-USDT',
+    ),
+})
+
+export type LaunchTemplateFormValues = z.infer<typeof launchTemplateFormSchema>
+
+/** 逗号/空格分隔的资产对文本 → 去重后的数组。 */
+export function splitAssets(value: string): string[] {
+  const parts = value
+    .split(/[,，\s]+/)
+    .map((item) => item.trim().toUpperCase())
+    .filter((item) => item.length > 0)
+
+  return [...new Set(parts)]
+}
+
 export type FieldErrors = Readonly<Record<string, string>>
 
 /** 把 zod 的 issue 列表压平成 `字段名 -> 首条错误` 的映射，便于表单渲染。 */
