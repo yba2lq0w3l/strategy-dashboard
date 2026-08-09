@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 .gstack/
 .vercel
+
+# 测试覆盖率报告（生成产物，用 npm run test:coverage 重新生成）
+coverage/
