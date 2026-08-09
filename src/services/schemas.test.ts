@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseStrategy, parseStrategyList } from './schemas'
+import { parseEquityHistory, parseStrategy, parseStrategyList } from './schemas'
 import { rawStrategy } from '../test/fixtures'
 
 describe('parseStrategy', () => {
@@ -113,5 +113,156 @@ describe('parseStrategyList', () => {
   it('响应缺少 items 字段时抛错', () => {
     expect(() => parseStrategyList({ foo: 'bar' })).toThrow(/items/)
     expect(() => parseStrategyList('nope')).toThrow()
+  })
+
+  it('解析顶层 summary 并归一化单位', () => {
+    const result = parseStrategyList({
+      items: [rawStrategy],
+      summary: {
+        total_pnl: 805.5,
+        total_pnl_pct: 3.66,
+        win_rate: 0.666,
+        max_drawdown: 0.125,
+      },
+    })
+
+    expect(result.summary).toEqual({
+      totalPnl: 805.5,
+      totalPnlPct: 3.66,
+      winRatePct: 66.6,
+      maxDrawdownPct: 12.5,
+    })
+  })
+
+  it('缺少 summary 时为 null', () => {
+    expect(parseStrategyList({ items: [] }).summary).toBeNull()
+  })
+})
+
+describe('策略收益字段的单位归一化', () => {
+  // 上游把两种单位混在同一个对象里，这是最容易搞错的地方。
+  it('win_rate / max_drawdown 是 0~1 比例，需 ×100', () => {
+    const strategy = parseStrategy({
+      ...rawStrategy,
+      win_rate: 0.666,
+      max_drawdown: 0.125,
+    })
+
+    expect(strategy.metrics?.winRatePct).toBe(66.6)
+    expect(strategy.metrics?.maxDrawdownPct).toBe(12.5)
+  })
+
+  it('total_pnl_pct 本身就是百分比，不能再乘 100', () => {
+    const strategy = parseStrategy({ ...rawStrategy, total_pnl_pct: 3.66 })
+    expect(strategy.metrics?.totalPnlPct).toBe(3.66)
+  })
+
+  it('比例上下界映射正确', () => {
+    expect(parseStrategy({ ...rawStrategy, win_rate: 1 }).metrics?.winRatePct).toBe(
+      100,
+    )
+    expect(parseStrategy({ ...rawStrategy, win_rate: 0 }).metrics?.winRatePct).toBe(
+      0,
+    )
+  })
+
+  it('收益字段全部缺失时 metrics 为 null，避免把 0 当成真实读数', () => {
+    expect(parseStrategy(rawStrategy).metrics).toBeNull()
+  })
+
+  it('只要有任意一个字段就补齐其余为 0', () => {
+    const strategy = parseStrategy({ ...rawStrategy, total_pnl: 100 })
+
+    expect(strategy.metrics).toEqual({
+      totalPnl: 100,
+      totalPnlPct: 0,
+      winRatePct: 0,
+      maxDrawdownPct: 0,
+    })
+  })
+
+  it('全 0 的真实统计仍视为有数据', () => {
+    const strategy = parseStrategy({
+      ...rawStrategy,
+      total_pnl: 0,
+      total_pnl_pct: 0,
+      win_rate: 0,
+      max_drawdown: 0,
+    })
+
+    expect(strategy.metrics).not.toBeNull()
+    expect(strategy.metrics?.totalPnl).toBe(0)
+  })
+})
+
+describe('parseEquityHistory', () => {
+  const rawPoint = {
+    timestamp: 1_800_000_000,
+    equity: 10_500,
+    pnl: 500,
+    drawdown_pct: 1.2,
+  }
+
+  it('把 Unix 秒转成毫秒并映射字段', () => {
+    const series = parseEquityHistory({ points: [rawPoint] })
+
+    expect(series.points).toHaveLength(1)
+    expect(series.points[0]).toEqual({
+      timestamp: 1_800_000_000_000,
+      equity: 10_500,
+      pnl: 500,
+      drawdownPct: 1.2,
+    })
+  })
+
+  it('空 points 返回空曲线且 summary 为 null', () => {
+    const series = parseEquityHistory({ points: [] })
+
+    expect(series.points).toHaveLength(0)
+    expect(series.summary).toBeNull()
+  })
+
+  it('points 为 null 时同样安全', () => {
+    expect(parseEquityHistory({ points: null }).points).toHaveLength(0)
+  })
+
+  it('按时间升序排列，避免折线自我交叉', () => {
+    const series = parseEquityHistory({
+      points: [
+        { ...rawPoint, timestamp: 300 },
+        { ...rawPoint, timestamp: 100 },
+        { ...rawPoint, timestamp: 200 },
+      ],
+    })
+
+    expect(series.points.map((p) => p.timestamp)).toEqual([
+      100_000, 200_000, 300_000,
+    ])
+  })
+
+  it('跳过坏点但保留其余，不让整条曲线消失', () => {
+    const series = parseEquityHistory({
+      points: [rawPoint, { timestamp: 'bad', equity: null }, rawPoint],
+    })
+
+    expect(series.points).toHaveLength(2)
+  })
+
+  it('附带由曲线派生的 summary', () => {
+    const series = parseEquityHistory({
+      points: [
+        { timestamp: 100, equity: 10_000, pnl: 0, drawdown_pct: 0 },
+        { timestamp: 200, equity: 11_000, pnl: 1_000, drawdown_pct: 2.5 },
+      ],
+    })
+
+    expect(series.summary?.baseEquity).toBe(10_000)
+    expect(series.summary?.totalPnl).toBe(1_000)
+    expect(series.summary?.totalPnlPct).toBe(10)
+    expect(series.summary?.maxDrawdownPct).toBe(2.5)
+  })
+
+  it('缺少 points 字段时抛错', () => {
+    expect(() => parseEquityHistory({ foo: 1 })).toThrow(/points/)
   })
 })

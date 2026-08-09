@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { LineChart, Loader2 } from 'lucide-react'
 import {
   Area,
   AreaChart,
@@ -9,7 +10,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import type { EquitySeries } from '../utils/equity'
+import type { EquitySeries } from '../types/equity'
 import {
   formatClock,
   formatCompactCurrency,
@@ -19,6 +20,7 @@ import {
 
 interface EquityChartProps {
   readonly series: EquitySeries
+  readonly loading: boolean
 }
 
 interface TooltipPayloadItem {
@@ -61,18 +63,54 @@ function EquityTooltip({ active, payload }: EquityTooltipProps) {
   )
 }
 
-export function EquityChart({ series }: EquityChartProps) {
-  const data = useMemo(() => series.points.map((point) => ({ ...point })), [series])
-  const isProfit = series.totalPnl >= 0
-  const strokeColor = isProfit ? 'var(--color-neon)' : 'var(--color-ask)'
+function EmptyState({ loading }: { loading: boolean }) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-2 py-14 text-center">
+      {loading ? (
+        <Loader2 aria-hidden className="size-6 animate-spin text-ink-faint" />
+      ) : (
+        <LineChart aria-hidden className="size-7 text-ink-faint" />
+      )}
+      <p className="text-sm text-ink-dim">
+        {loading ? '正在加载权益曲线…' : '当前时间窗口内暂无净值数据'}
+      </p>
+      {!loading && (
+        <p className="text-[11px] text-ink-faint">
+          策略产生成交后，曲线会自动出现
+        </p>
+      )}
+    </div>
+  )
+}
+
+export function EquityChart({ series, loading }: EquityChartProps) {
+  const { points, summary } = series
+  const data = useMemo(() => points.map((point) => ({ ...point })), [points])
 
   const domain = useMemo(() => {
+    if (data.length === 0) return [0, 1] as const
     const values = data.map((point) => point.equity)
     const min = Math.min(...values)
     const max = Math.max(...values)
-    const pad = Math.max((max - min) * 0.18, max * 0.002)
+    const pad = Math.max((max - min) * 0.18, Math.abs(max) * 0.002, 1)
     return [min - pad, max + pad] as const
   }, [data])
+
+  // 曲线为空时只渲染空态，不画一条贴地的假线。
+  if (summary === null) {
+    return (
+      <div className="flex h-full flex-col">
+        <div className="px-4 pt-3">
+          <p className="label-caps">Cumulative Equity</p>
+          <p className="numeric mt-1 text-2xl font-semibold text-ink-faint">—</p>
+        </div>
+        <EmptyState loading={loading} />
+      </div>
+    )
+  }
+
+  const isProfit = summary.totalPnl >= 0
+  const strokeColor = isProfit ? 'var(--color-neon)' : 'var(--color-ask)'
 
   return (
     <div className="flex h-full flex-col">
@@ -81,12 +119,12 @@ export function EquityChart({ series }: EquityChartProps) {
           <p className="label-caps">Cumulative Equity</p>
           <div className="mt-1 flex items-baseline gap-2.5">
             <span className="numeric text-2xl font-semibold text-ink">
-              {formatCurrency(series.finalEquity)}
+              {formatCurrency(summary.finalEquity)}
             </span>
             <span
               className={`numeric text-sm font-semibold ${isProfit ? 'text-neon-soft' : 'text-ask'}`}
             >
-              {formatSignedPercent(series.totalPnlPct)}
+              {formatSignedPercent(summary.totalPnlPct)}
             </span>
           </div>
         </div>
@@ -95,7 +133,7 @@ export function EquityChart({ series }: EquityChartProps) {
           <div>
             <dt className="label-caps">Base</dt>
             <dd className="numeric text-xs text-ink-dim">
-              {formatCompactCurrency(series.baseCapital)}
+              {formatCompactCurrency(summary.baseEquity)}
             </dd>
           </div>
           <div>
@@ -104,13 +142,13 @@ export function EquityChart({ series }: EquityChartProps) {
               className={`numeric text-xs ${isProfit ? 'text-neon-soft' : 'text-ask'}`}
             >
               {isProfit ? '+' : ''}
-              {formatCompactCurrency(series.totalPnl)}
+              {formatCompactCurrency(summary.totalPnl)}
             </dd>
           </div>
           <div>
             <dt className="label-caps">Max DD</dt>
             <dd className="numeric text-xs text-amber-300">
-              {series.maxDrawdownPct.toFixed(2)}%
+              {summary.maxDrawdownPct.toFixed(2)}%
             </dd>
           </div>
         </dl>
@@ -159,7 +197,7 @@ export function EquityChart({ series }: EquityChartProps) {
             />
 
             <ReferenceLine
-              y={series.baseCapital}
+              y={summary.baseEquity}
               stroke="rgba(148,163,184,0.35)"
               strokeDasharray="4 4"
             />

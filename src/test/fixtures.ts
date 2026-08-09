@@ -34,6 +34,7 @@ export function makeStrategy(overrides: Partial<Strategy> = {}): Strategy {
     expiresAt: null,
     state: 'active',
     version: 1,
+    metrics: null,
     ...overrides,
   }
 }

@@ -1,12 +1,15 @@
 import type { CreateStrategyInput, Strategy } from '../types/strategy'
+import type { EquityRange, EquitySeries } from '../types/equity'
 import { request } from './httpClient'
 import {
+  parseEquityHistory,
   parseStrategy,
   parseStrategyList,
   type StrategyListResult,
 } from './schemas'
 
 const STRATEGIES_PATH = '/v1/agent/strategies'
+const EQUITY_HISTORY_PATH = `${STRATEGIES_PATH}/equity-history`
 
 function toCreatePayload(input: CreateStrategyInput): Record<string, unknown> {
   return {
@@ -32,6 +35,11 @@ export interface StrategyRepository {
   resume(strategyId: string): Promise<Strategy>
   terminate(strategyId: string): Promise<Strategy>
   allocate(strategyId: string, allocation: string): Promise<Strategy>
+  equityHistory(
+    range: EquityRange,
+    strategyId?: string,
+    signal?: AbortSignal,
+  ): Promise<EquitySeries>
 }
 
 export const strategyApi: StrategyRepository = {
@@ -74,6 +82,15 @@ export const strategyApi: StrategyRepository = {
       { method: 'POST', body: { allocation } },
     )
     return parseStrategy(payload)
+  },
+
+  async equityHistory(range, strategyId, signal) {
+    const params = new URLSearchParams({ range })
+    // 不传 strategy_id 时上游返回该 Agent 的合并曲线。
+    if (strategyId) params.set('strategy_id', strategyId)
+
+    const payload = await request(`${EQUITY_HISTORY_PATH}?${params}`, { signal })
+    return parseEquityHistory(payload)
   },
 }
 

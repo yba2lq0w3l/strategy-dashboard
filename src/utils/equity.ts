@@ -1,98 +1,38 @@
-import { createRandom, gaussian, hashSeed } from './random'
+import type { EquityPoint, EquitySummary } from '../types/equity'
 
 /**
- * 权益曲线合成。
+ * 权益曲线汇总。
  *
- * ⚠️ 该曲线为**模拟数据**：上游 `/v1/agent/strategies` 系列接口不提供
- * PnL / 净值时间序列。曲线的初始资金、波动率与漂移都由真实的策略
- * 分配额度、杠杆与活跃数量推导，因此会随真实策略变化而变化，
- * 但单点收益本身不代表真实成交结果。
+ * 曲线数据来自后端 `/v1/agent/strategies/equity-history`，这里只做派生统计。
+ * 刻意从曲线点本身推导而不是直接用策略的 total_pnl：图表头部的数字必须和画出来的
+ * 线一致，而 total_pnl 是全周期口径、曲线是窗口口径，两者混用会自相矛盾。
  */
-
-export interface EquityPoint {
-  readonly timestamp: number
-  readonly equity: number
-  readonly pnl: number
-  readonly drawdownPct: number
-}
-
-export interface EquitySeries {
-  readonly points: readonly EquityPoint[]
-  readonly baseCapital: number
-  readonly finalEquity: number
-  readonly totalPnl: number
-  readonly totalPnlPct: number
-  readonly maxDrawdownPct: number
-}
-
-export interface EquitySeriesParams {
-  readonly seed: string
-  readonly baseCapital: number
-  readonly points?: number
-  readonly intervalMs?: number
-  readonly endTime: number
-  /** 每步波动率（相对基准资金的比例）。 */
-  readonly volatility?: number
-  /** 每步漂移，正值代表策略整体处于盈利倾向。 */
-  readonly drift?: number
-}
-
-const DEFAULT_POINTS = 72
-const DEFAULT_INTERVAL_MS = 5 * 60 * 1000
-const DEFAULT_VOLATILITY = 0.0045
-const DEFAULT_DRIFT = 0.0011
-const MIN_BASE_CAPITAL = 1_000
-
-export function buildEquitySeries(params: EquitySeriesParams): EquitySeries {
-  const {
-    seed,
-    endTime,
-    points = DEFAULT_POINTS,
-    intervalMs = DEFAULT_INTERVAL_MS,
-    volatility = DEFAULT_VOLATILITY,
-    drift = DEFAULT_DRIFT,
-  } = params
-
-  const baseCapital = Math.max(params.baseCapital, MIN_BASE_CAPITAL)
-  const totalPoints = Math.max(2, Math.floor(points))
-  const random = createRandom(hashSeed(seed))
-
-  const series: EquityPoint[] = []
-  let equity = baseCapital
-  let peak = baseCapital
-  let maxDrawdownPct = 0
-
-  for (let i = 0; i < totalPoints; i += 1) {
-    if (i > 0) {
-      const shock = gaussian(random) * volatility
-      equity = equity * (1 + drift + shock)
-    }
-
-    peak = Math.max(peak, equity)
-    const drawdownPct = peak > 0 ? ((peak - equity) / peak) * 100 : 0
-    maxDrawdownPct = Math.max(maxDrawdownPct, drawdownPct)
-
-    series.push({
-      timestamp: endTime - (totalPoints - 1 - i) * intervalMs,
-      equity: round2(equity),
-      pnl: round2(equity - baseCapital),
-      drawdownPct: round2(drawdownPct),
-    })
-  }
-
-  const finalEquity = series[series.length - 1].equity
-  const totalPnl = round2(finalEquity - baseCapital)
-
-  return {
-    points: series,
-    baseCapital,
-    finalEquity,
-    totalPnl,
-    totalPnlPct: round2((totalPnl / baseCapital) * 100),
-    maxDrawdownPct: round2(maxDrawdownPct),
-  }
-}
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100
+}
+
+/** 无数据点时返回 null，让 UI 渲染空态而不是把 0 当成真实读数。 */
+export function summarizeEquity(
+  points: readonly EquityPoint[],
+): EquitySummary | null {
+  if (points.length === 0) return null
+
+  const baseEquity = points[0].equity
+  const finalEquity = points[points.length - 1].equity
+  const totalPnl = finalEquity - baseEquity
+
+  // 优先采用后端逐点给出的回撤；缺失时才从净值序列自行推导。
+  const maxDrawdownPct = points.reduce(
+    (worst, point) => Math.max(worst, point.drawdownPct),
+    0,
+  )
+
+  return {
+    baseEquity: round2(baseEquity),
+    finalEquity: round2(finalEquity),
+    totalPnl: round2(totalPnl),
+    totalPnlPct: baseEquity !== 0 ? round2((totalPnl / baseEquity) * 100) : 0,
+    maxDrawdownPct: round2(maxDrawdownPct),
+  }
 }

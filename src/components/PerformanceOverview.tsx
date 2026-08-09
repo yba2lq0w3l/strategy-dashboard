@@ -1,21 +1,27 @@
-import { Activity, Gauge, ShieldAlert, Wallet } from 'lucide-react'
-import { RISK_LIMITS } from '../config/env'
+import { Activity, Gauge, TrendingDown, Wallet } from 'lucide-react'
+import type { StrategyMetrics } from '../types/strategy'
 import type { PortfolioMetrics } from '../utils/metrics'
-import { formatCompactCurrency, formatPercent } from '../utils/format'
+import {
+  formatCompactCurrency,
+  formatPercent,
+  formatSignedPercent,
+} from '../utils/format'
 import { MetricCard } from './MetricCard'
 
 interface PerformanceOverviewProps {
   readonly metrics: PortfolioMetrics
-  /** 来自权益曲线的当前最大回撤（模拟）。 */
-  readonly currentDrawdownPct: number
+  /** 后端返回的整体收益统计，未就绪时为 null。 */
+  readonly summary: StrategyMetrics | null
 }
+
+const PLACEHOLDER = '—'
 
 export function PerformanceOverview({
   metrics,
-  currentDrawdownPct,
+  summary,
 }: PerformanceOverviewProps) {
-  const drawdownUsage = currentDrawdownPct / RISK_LIMITS.maxDrawdownPct
-  const breached = currentDrawdownPct >= RISK_LIMITS.maxDrawdownPct
+  const hasPnl = summary !== null
+  const pnlPositive = (summary?.totalPnl ?? 0) >= 0
 
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -30,34 +36,39 @@ export function PerformanceOverview({
       />
 
       <MetricCard
-        label="Total Allocated Capital"
-        value={formatCompactCurrency(metrics.totalAllocated)}
+        label="Total PnL"
+        value={hasPnl ? formatCompactCurrency(summary.totalPnl) : PLACEHOLDER}
         icon={<Wallet aria-hidden className="size-4" />}
-        tone="flux"
-        progress={metrics.capacityUsagePct / 100}
-        hint={`容量使用率 ${formatPercent(metrics.capacityUsagePct)} · 上限 ${formatCompactCurrency(metrics.totalCapitalCapacity)}`}
+        tone={hasPnl && !pnlPositive ? 'ask' : 'neon'}
+        hint={
+          hasPnl
+            ? `收益率 ${formatSignedPercent(summary.totalPnlPct)} · 已分配 ${formatCompactCurrency(metrics.totalAllocated)}`
+            : '暂无收益数据 · 策略成交后自动更新'
+        }
       />
 
       <MetricCard
-        label="Estimated Win Rate"
-        value={RISK_LIMITS.estimatedWinRatePct.toFixed(1)}
-        unit="%"
+        label="Win Rate"
+        value={hasPnl ? summary.winRatePct.toFixed(1) : PLACEHOLDER}
+        unit={hasPnl ? '%' : undefined}
         icon={<Gauge aria-hidden className="size-4" />}
         tone="neon"
-        simulated
-        progress={RISK_LIMITS.estimatedWinRatePct / 100}
-        hint="模型胜率预测 · 后端暂未提供回测统计接口"
+        progress={hasPnl ? summary.winRatePct / 100 : undefined}
+        hint={hasPnl ? '全部策略合并胜率' : '暂无成交记录'}
       />
 
       <MetricCard
-        label="Max Drawdown Limit"
-        value={RISK_LIMITS.maxDrawdownPct.toFixed(1)}
-        unit="%"
-        icon={<ShieldAlert aria-hidden className="size-4" />}
-        tone={breached ? 'ask' : 'amber'}
-        simulated
-        progress={drawdownUsage}
-        hint={`当前回撤 ${formatPercent(currentDrawdownPct, 2)} · 已用额度 ${formatPercent(drawdownUsage * 100)}`}
+        label="Max Drawdown"
+        value={hasPnl ? summary.maxDrawdownPct.toFixed(2) : PLACEHOLDER}
+        unit={hasPnl ? '%' : undefined}
+        icon={<TrendingDown aria-hidden className="size-4" />}
+        tone={hasPnl && summary.maxDrawdownPct > 0 ? 'amber' : 'flux'}
+        progress={hasPnl ? summary.maxDrawdownPct / 100 : undefined}
+        hint={
+          hasPnl
+            ? `容量使用率 ${formatPercent(metrics.capacityUsagePct)}`
+            : '暂无回撤数据'
+        }
       />
     </div>
   )

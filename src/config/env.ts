@@ -57,9 +57,3 @@ export const REFRESH_INTERVALS = [
 ] as const
 
 export type RefreshInterval = (typeof REFRESH_INTERVALS)[number]['value']
-
-/** 面板中用于风控展示的固定阈值（后端暂无对应接口）。 */
-export const RISK_LIMITS = Object.freeze({
-  maxDrawdownPct: 12.5,
-  estimatedWinRatePct: 66.6,
-})

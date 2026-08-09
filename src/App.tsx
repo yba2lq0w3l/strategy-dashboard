@@ -4,7 +4,9 @@ import { Header } from './components/Header'
 import { PerformanceOverview } from './components/PerformanceOverview'
 import { EquityChart } from './components/EquityChart'
 import { ChartRangePicker } from './components/ChartRangePicker'
-import { CHART_RANGES, type ChartRange } from './config/chartRanges'
+import { DEFAULT_CHART_RANGE } from './config/chartRanges'
+import type { EquityRange } from './types/equity'
+import { useEquityHistory } from './hooks/useEquityHistory'
 import { StrategyGrid } from './components/StrategyGrid'
 import { TelemetryPanel } from './components/telemetry/TelemetryPanel'
 import { LogConsole } from './components/telemetry/LogConsole'
@@ -20,11 +22,9 @@ import { useTelemetry } from './hooks/useTelemetry'
 import { useToasts, type ToastTone } from './hooks/useToasts'
 import { useNow } from './hooks/useNow'
 import { activeRatio, computePortfolioMetrics } from './utils/metrics'
-import { buildEquitySeries } from './utils/equity'
 import type { Strategy, StrategyAction } from './types/strategy'
 
 const DEFAULT_INTERVAL: RefreshInterval = REFRESH_INTERVALS[1].value
-const FALLBACK_BASE_CAPITAL = 100_000
 const CLOCK_TICK_MS = 1_000
 
 const EVENT_TONE: Record<StrategyEvent['level'], ToastTone> = {
@@ -39,7 +39,7 @@ export default function App() {
     useState<RefreshInterval>(DEFAULT_INTERVAL)
   const [createOpen, setCreateOpen] = useState(false)
   const [allocateTarget, setAllocateTarget] = useState<Strategy | null>(null)
-  const [range, setRange] = useState<ChartRange>(CHART_RANGES[1])
+  const [range, setRange] = useState<EquityRange>(DEFAULT_CHART_RANGE)
 
   const now = useNow(CLOCK_TICK_MS)
   const { logs, push, pushEntry, clear } = useConsoleLog()
@@ -58,6 +58,7 @@ export default function App() {
 
   const {
     strategies,
+    summary,
     status,
     error,
     lastSyncAt,
@@ -69,32 +70,28 @@ export default function App() {
     allocate,
   } = useStrategies({ intervalMs: refreshInterval, onEvent: handleEvent })
 
+  const handleEquityError = useCallback(
+    (message: string) => {
+      push('error', 'EQUITY', `权益曲线加载失败 · ${message}`)
+    },
+    [push],
+  )
+
+  const { series: equity, loading: equityLoading } = useEquityHistory({
+    range,
+    intervalMs: refreshInterval,
+    onError: handleEquityError,
+  })
+
   const metrics = useMemo(
     () => computePortfolioMetrics(strategies),
     [strategies],
   )
 
+  // Neural Stream 仍是前端合成的遥测，用策略状态派生种子保持稳定。
   const seed = useMemo(
     () => strategies.map((item) => `${item.strategyId}:${item.state}`).join('|'),
     [strategies],
-  )
-
-  // 曲线终点对齐到当前时间片，避免每秒重算导致的视觉抖动。
-  const alignedEnd = Math.floor(now / range.intervalMs) * range.intervalMs
-
-  const equity = useMemo(
-    () =>
-      buildEquitySeries({
-        seed: seed || 'idle',
-        baseCapital: metrics.totalAllocated || FALLBACK_BASE_CAPITAL,
-        points: range.points,
-        intervalMs: range.intervalMs,
-        endTime: alignedEnd,
-        // 杠杆越高，模拟出的波动越大。
-        volatility: 0.003 * (1 + metrics.avgLeverage / 5),
-        drift: 0.0009 * (metrics.activeCount > 0 ? 1 : 0.15),
-      }),
-    [seed, metrics, range, alignedEnd],
   )
 
   const telemetry = useTelemetry({
@@ -126,22 +123,19 @@ export default function App() {
         onCreate={() => setCreateOpen(true)}
       />
 
-      <PerformanceOverview
-        metrics={metrics}
-        currentDrawdownPct={equity.maxDrawdownPct}
-      />
+      <PerformanceOverview metrics={metrics} summary={summary} />
 
       <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="flex min-w-0 flex-col gap-3">
           <Panel
             title="Equity Curve"
-            subtitle="累计权益 · 模拟数据（后端暂无 PnL 接口）"
+            subtitle="累计权益 · 来自 equity-history 接口"
             icon={<LineChart aria-hidden className="size-4" />}
             actions={<ChartRangePicker value={range} onChange={setRange} />}
             className="min-h-[320px]"
             glow
           >
-            <EquityChart series={equity} />
+            <EquityChart series={equity} loading={equityLoading} />
           </Panel>
 
           <Panel
@@ -190,11 +184,9 @@ export default function App() {
       </div>
 
       <footer className="px-1 pb-1 text-[10px] leading-relaxed text-ink-faint">
-        策略、资金与状态数据实时来自 Staging 后端；
-        <span className="text-ink-dim">
-          权益曲线、胜率、回撤限制与信号流为前端模拟
-        </span>
-        （后端尚未提供对应接口），仅用于界面演示，不代表真实成交结果。
+        策略、资金、状态、收益与权益曲线均实时来自 Staging 后端；右侧
+        <span className="text-ink-dim"> Neural Stream 信号流为前端合成</span>
+        （后端暂未提供订单簿与因子接口），仅作界面演示。
       </footer>
 
       <CreateStrategyModal

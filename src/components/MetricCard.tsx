@@ -9,8 +9,6 @@ interface MetricCardProps {
   readonly hint?: ReactNode
   readonly icon: ReactNode
   readonly tone?: MetricTone
-  /** 标记该指标为前端模拟值（后端暂无对应接口）。 */
-  readonly simulated?: boolean
   /** 0~1，绘制底部进度条。 */
   readonly progress?: number
 }
@@ -47,7 +45,6 @@ export function MetricCard({
   hint,
   icon,
   tone = 'neon',
-  simulated = false,
   progress,
 }: MetricCardProps) {
   const clamped =
@@ -69,14 +66,6 @@ export function MetricCard({
           {value}
         </span>
         {unit && <span className="numeric text-sm text-ink-faint">{unit}</span>}
-        {simulated && (
-          <span
-            className="ml-1 rounded border border-hairline px-1 font-mono text-[9px] tracking-wider text-ink-faint"
-            title="该指标由前端模拟生成，后端暂未提供对应接口"
-          >
-            SIM
-          </span>
-        )}
       </div>
 
       {hint && (

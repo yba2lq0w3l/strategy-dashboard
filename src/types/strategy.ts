@@ -10,6 +10,25 @@ export type StrategyState = 'created' | 'active' | 'paused' | 'terminated'
 
 export type RuntimeEnv = 'live' | 'paper' | 'backtest'
 
+/**
+ * 策略收益统计。
+ *
+ * ⚠️ 单位口径：上游把两种单位混在同一个对象里——
+ * `total_pnl_pct` 是百分比（3.66 表示 3.66%），
+ * 而 `win_rate` / `max_drawdown` 是 0~1 比例（0.666 表示 66.6%）。
+ * 解析层已统一归一化成百分比，UI 层拿到的全部是「百分比」口径。
+ */
+export interface StrategyMetrics {
+  /** 累计收益金额。 */
+  readonly totalPnl: number
+  /** 累计收益率百分比，3.66 表示 3.66%。 */
+  readonly totalPnlPct: number
+  /** 胜率百分比，66.6 表示 66.6%（上游的 0.666 已 ×100）。 */
+  readonly winRatePct: number
+  /** 最大回撤百分比，12.5 表示 12.5%（上游的 0.125 已 ×100）。 */
+  readonly maxDrawdownPct: number
+}
+
 export interface Strategy {
   readonly strategyId: string
   readonly userId: string | null
@@ -25,6 +44,8 @@ export interface Strategy {
   readonly expiresAt: string | null
   readonly state: StrategyState
   readonly version: number
+  /** 收益统计。上游把这些字段标为可选，缺失时为 null。 */
+  readonly metrics: StrategyMetrics | null
 }
 
 export interface CreateStrategyInput {

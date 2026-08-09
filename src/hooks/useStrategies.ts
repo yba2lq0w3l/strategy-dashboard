@@ -5,6 +5,7 @@ import type {
   CreateStrategyInput,
   Strategy,
   StrategyAction,
+  StrategyMetrics,
 } from '../types/strategy'
 import { useInterval } from './useInterval'
 
@@ -18,6 +19,8 @@ export interface StrategyEvent {
 
 interface StrategiesState {
   readonly strategies: readonly Strategy[]
+  /** 全部策略合并后的整体收益统计，上游未返回时为 null。 */
+  readonly summary: StrategyMetrics | null
   readonly status: ConnectionStatus
   readonly error: string | null
   readonly lastSyncAt: number | null
@@ -27,6 +30,7 @@ interface StrategiesState {
 
 const INITIAL_STATE: StrategiesState = {
   strategies: [],
+  summary: null,
   status: 'connecting',
   error: null,
   lastSyncAt: null,
@@ -102,6 +106,7 @@ export function useStrategies(
       setState((prev) => ({
         ...prev,
         strategies: result.strategies,
+        summary: result.summary,
         skipped: result.skipped,
         status: 'online',
         error: null,

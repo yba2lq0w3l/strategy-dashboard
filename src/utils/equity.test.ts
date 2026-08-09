@@ -1,104 +1,77 @@
 import { describe, expect, it } from 'vitest'
-import { buildEquitySeries } from './equity'
+import { summarizeEquity } from './equity'
+import type { EquityPoint } from '../types/equity'
 
-const END_TIME = Date.parse('2026-08-08T12:00:00Z')
+function point(
+  timestamp: number,
+  equity: number,
+  pnl: number,
+  drawdownPct = 0,
+): EquityPoint {
+  return { timestamp, equity, pnl, drawdownPct }
+}
 
-describe('buildEquitySeries', () => {
-  it('生成指定数量的点', () => {
-    const series = buildEquitySeries({
-      seed: 'a',
-      baseCapital: 100_000,
-      points: 48,
-      endTime: END_TIME,
-    })
-
-    expect(series.points).toHaveLength(48)
+describe('summarizeEquity', () => {
+  it('无数据点时返回 null，让 UI 走空态而不是显示 0', () => {
+    expect(summarizeEquity([])).toBeNull()
   })
 
-  it('同一 seed 产出完全一致的曲线（避免大屏抖动）', () => {
-    const params = { seed: 'stable', baseCapital: 50_000, endTime: END_TIME }
-    const first = buildEquitySeries(params)
-    const second = buildEquitySeries(params)
+  it('从首末点派生基准、终值与收益', () => {
+    const summary = summarizeEquity([
+      point(1_000, 10_000, 0),
+      point(2_000, 10_500, 500),
+      point(3_000, 10_800, 800),
+    ])
 
-    expect(first.points).toEqual(second.points)
-    expect(first.totalPnl).toBe(second.totalPnl)
+    expect(summary).not.toBeNull()
+    expect(summary?.baseEquity).toBe(10_000)
+    expect(summary?.finalEquity).toBe(10_800)
+    expect(summary?.totalPnl).toBe(800)
+    expect(summary?.totalPnlPct).toBe(8)
   })
 
-  it('不同 seed 产出不同曲线', () => {
-    const a = buildEquitySeries({ seed: 'a', baseCapital: 50_000, endTime: END_TIME })
-    const b = buildEquitySeries({ seed: 'b', baseCapital: 50_000, endTime: END_TIME })
+  it('亏损时收益与收益率均为负', () => {
+    const summary = summarizeEquity([
+      point(1_000, 10_000, 0),
+      point(2_000, 9_500, -500),
+    ])
 
-    expect(a.finalEquity).not.toBe(b.finalEquity)
+    expect(summary?.totalPnl).toBe(-500)
+    expect(summary?.totalPnlPct).toBe(-5)
   })
 
-  it('首点等于基准资金，末点时间戳等于 endTime', () => {
-    const series = buildEquitySeries({
-      seed: 'x',
-      baseCapital: 20_000,
-      points: 10,
-      intervalMs: 60_000,
-      endTime: END_TIME,
-    })
+  it('取逐点回撤的最大值', () => {
+    const summary = summarizeEquity([
+      point(1_000, 10_000, 0, 0),
+      point(2_000, 9_000, -1_000, 10),
+      point(3_000, 9_500, -500, 5),
+    ])
 
-    expect(series.points[0].equity).toBe(20_000)
-    expect(series.points[0].pnl).toBe(0)
-    expect(series.points.at(-1)?.timestamp).toBe(END_TIME)
-    expect(series.points[0].timestamp).toBe(END_TIME - 9 * 60_000)
+    expect(summary?.maxDrawdownPct).toBe(10)
   })
 
-  it('回撤为非负且不小于任一时点回撤', () => {
-    const series = buildEquitySeries({
-      seed: 'dd',
-      baseCapital: 100_000,
-      endTime: END_TIME,
-    })
+  it('单点曲线不产生除零或 NaN', () => {
+    const summary = summarizeEquity([point(1_000, 10_000, 0)])
 
-    expect(series.maxDrawdownPct).toBeGreaterThanOrEqual(0)
-    for (const point of series.points) {
-      expect(point.drawdownPct).toBeLessThanOrEqual(series.maxDrawdownPct + 1e-6)
-    }
+    expect(summary?.totalPnl).toBe(0)
+    expect(summary?.totalPnlPct).toBe(0)
   })
 
-  it('PnL 与最终权益、基准资金保持一致', () => {
-    const series = buildEquitySeries({
-      seed: 'pnl',
-      baseCapital: 80_000,
-      endTime: END_TIME,
-    })
+  it('基准为 0 时收益率退化为 0 而不是 Infinity', () => {
+    const summary = summarizeEquity([point(1_000, 0, 0), point(2_000, 500, 500)])
 
-    expect(series.totalPnl).toBeCloseTo(series.finalEquity - series.baseCapital, 2)
-    expect(series.totalPnlPct).toBeCloseTo(
-      (series.totalPnl / series.baseCapital) * 100,
-      2,
-    )
+    expect(Number.isFinite(summary?.totalPnlPct ?? Number.NaN)).toBe(true)
+    expect(summary?.totalPnlPct).toBe(0)
   })
 
-  it('对过小或非法的基准资金做下限保护', () => {
-    const series = buildEquitySeries({ seed: 'z', baseCapital: 0, endTime: END_TIME })
-    expect(series.baseCapital).toBe(1_000)
-  })
+  it('金额四舍五入到 2 位小数', () => {
+    const summary = summarizeEquity([
+      point(1_000, 10_000.123, 0),
+      point(2_000, 10_123.456, 123.333),
+    ])
 
-  it('点数下限为 2', () => {
-    const series = buildEquitySeries({
-      seed: 'z',
-      baseCapital: 10_000,
-      points: 1,
-      endTime: END_TIME,
-    })
-    expect(series.points).toHaveLength(2)
-  })
-
-  it('零波动零漂移时曲线保持水平', () => {
-    const series = buildEquitySeries({
-      seed: 'flat',
-      baseCapital: 10_000,
-      points: 5,
-      volatility: 0,
-      drift: 0,
-      endTime: END_TIME,
-    })
-
-    expect(series.points.every((point) => point.equity === 10_000)).toBe(true)
-    expect(series.maxDrawdownPct).toBe(0)
+    expect(summary?.baseEquity).toBe(10_000.12)
+    expect(summary?.finalEquity).toBe(10_123.46)
+    expect(summary?.totalPnl).toBe(123.33)
   })
 })

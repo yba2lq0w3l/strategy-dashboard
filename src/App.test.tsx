@@ -8,6 +8,7 @@ const listMock = vi.fn()
 const pauseMock = vi.fn()
 const createMock = vi.fn()
 const allocateMock = vi.fn()
+const equityMock = vi.fn()
 
 vi.mock('./services/api', () => ({
   strategyApi: {
@@ -18,6 +19,7 @@ vi.mock('./services/api', () => ({
     terminate: vi.fn(),
     create: (...args: unknown[]) => createMock(...args),
     allocate: (...args: unknown[]) => allocateMock(...args),
+    equityHistory: (...args: unknown[]) => equityMock(...args),
   },
 }))
 
@@ -52,12 +54,35 @@ const strategies = [
   }),
 ]
 
+const summary = {
+  totalPnl: 805.5,
+  totalPnlPct: 3.66,
+  winRatePct: 66.6,
+  maxDrawdownPct: 12.5,
+}
+
+const equitySeries = {
+  points: [
+    { timestamp: 1_800_000_000_000, equity: 22_000, pnl: 0, drawdownPct: 0 },
+    { timestamp: 1_800_000_300_000, equity: 22_805, pnl: 805, drawdownPct: 1.61 },
+  ],
+  summary: {
+    baseEquity: 22_000,
+    finalEquity: 22_805,
+    totalPnl: 805,
+    totalPnlPct: 3.66,
+    maxDrawdownPct: 1.61,
+  },
+}
+
 beforeEach(() => {
   listMock.mockReset()
   pauseMock.mockReset()
   createMock.mockReset()
   allocateMock.mockReset()
-  listMock.mockResolvedValue({ strategies, skipped: 0 })
+  equityMock.mockReset()
+  listMock.mockResolvedValue({ strategies, summary, skipped: 0 })
+  equityMock.mockResolvedValue(equitySeries)
 })
 
 async function renderApp() {
@@ -72,28 +97,45 @@ describe('App 大屏首屏', () => {
     await renderApp()
 
     expect(screen.getByText('Active Strategies')).toBeInTheDocument()
-    expect(screen.getByText('Total Allocated Capital')).toBeInTheDocument()
-    expect(screen.getByText('Estimated Win Rate')).toBeInTheDocument()
-    expect(screen.getByText('Max Drawdown Limit')).toBeInTheDocument()
+    expect(screen.getByText('Total PnL')).toBeInTheDocument()
+    expect(screen.getByText('Win Rate')).toBeInTheDocument()
+    expect(screen.getByText('Max Drawdown')).toBeInTheDocument()
   })
 
-  it('核心指标由真实策略数据聚合而来', async () => {
+  it('活跃策略数由真实策略列表聚合而来', async () => {
     await renderApp()
-
-    // 2 个策略中 1 个 active，总分配 30000 + 10000 = 40000
     expect(screen.getByText('/ 2')).toBeInTheDocument()
-
-    const capitalCard = screen
-      .getByText('Total Allocated Capital')
-      .closest('article') as HTMLElement
-    expect(within(capitalCard).getByText('$40.00K')).toBeInTheDocument()
-    // 容量使用率 = 40000 / 100000
-    expect(within(capitalCard).getByText(/40\.0%/)).toBeInTheDocument()
   })
 
-  it('模拟指标带 SIM 标记，避免被误读为真实数据', async () => {
+  it('收益指标来自后端 summary，不再是模拟值', async () => {
     await renderApp()
-    expect(screen.getAllByText('SIM')).toHaveLength(2)
+
+    // 紧凑格式在 100~1000 区间不带小数，805.5 → $806
+    const pnlCard = screen.getByText('Total PnL').closest('article') as HTMLElement
+    expect(within(pnlCard).getByText('$806')).toBeInTheDocument()
+    expect(within(pnlCard).getByText(/收益率 \+3\.66%/)).toBeInTheDocument()
+
+    const winCard = screen.getByText('Win Rate').closest('article') as HTMLElement
+    expect(within(winCard).getByText('66.6')).toBeInTheDocument()
+
+    const ddCard = screen
+      .getByText('Max Drawdown')
+      .closest('article') as HTMLElement
+    expect(within(ddCard).getByText('12.50')).toBeInTheDocument()
+  })
+
+  it('不再出现任何 SIM 角标', async () => {
+    await renderApp()
+    expect(screen.queryByText('SIM')).not.toBeInTheDocument()
+  })
+
+  it('summary 缺失时指标显示占位符而不是 0', async () => {
+    listMock.mockResolvedValue({ strategies, summary: null, skipped: 0 })
+    await renderApp()
+
+    const pnlCard = screen.getByText('Total PnL').closest('article') as HTMLElement
+    expect(within(pnlCard).getByText('—')).toBeInTheDocument()
+    expect(within(pnlCard).getByText(/暂无收益数据/)).toBeInTheDocument()
   })
 
   it('渲染权益曲线、策略网格与遥测面板', async () => {
@@ -106,11 +148,53 @@ describe('App 大屏首屏', () => {
     expect(screen.getByText('Alpha Momentum')).toBeInTheDocument()
   })
 
-  it('底部注明哪些数据是模拟的', async () => {
+  it('页脚只把 Neural Stream 标为前端合成', async () => {
     await renderApp()
+
     expect(
-      screen.getByText(/权益曲线、胜率、回撤限制与信号流为前端模拟/),
+      screen.getByText(/Neural Stream 信号流为前端合成/),
     ).toBeInTheDocument()
+    expect(screen.queryByText(/权益曲线、胜率、回撤限制与信号流为前端模拟/))
+      .not.toBeInTheDocument()
+  })
+})
+
+describe('App 权益曲线', () => {
+  it('用默认窗口 6h 拉取曲线并渲染真实汇总', async () => {
+    await renderApp()
+
+    expect(equityMock).toHaveBeenCalledWith('6h')
+    expect(screen.getByText('$22,805')).toBeInTheDocument()
+    expect(screen.getByText('+3.66%')).toBeInTheDocument()
+  })
+
+  it('曲线为空时渲染空态而不是画一条贴地假线', async () => {
+    equityMock.mockResolvedValue({ points: [], summary: null })
+    await renderApp()
+
+    expect(
+      await screen.findByText('当前时间窗口内暂无净值数据'),
+    ).toBeInTheDocument()
+  })
+
+  it('切换时间窗口用后端接受的取值重新拉取', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+
+    const picker = screen.getByRole('group', { name: '图表时间范围' })
+    await user.click(within(picker).getByRole('button', { name: '24H' }))
+
+    await waitFor(() => expect(equityMock).toHaveBeenCalledWith('24h'))
+  })
+
+  it('曲线接口失败时写入控制台日志且不影响策略网格', async () => {
+    equityMock.mockRejectedValue(new Error('上游超时'))
+    await renderApp()
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/权益曲线加载失败/).length).toBeGreaterThan(0),
+    )
+    expect(screen.getByText('Alpha Momentum')).toBeInTheDocument()
   })
 })
 
